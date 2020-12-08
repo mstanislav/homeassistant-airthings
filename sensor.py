@@ -8,7 +8,7 @@ import voluptuous as vol
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.util import Throttle
-from homeassistant.const import (TEMP_CELSIUS, DEVICE_CLASS_HUMIDITY, DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_PRESSURE, STATE_UNKNOWN)
+from homeassistant.const import (TEMP_CELSIUS, DEVICE_CLASS_HUMIDITY, DEVICE_CLASS_TEMPERATURE, STATE_UNKNOWN)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,23 +22,18 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 MIN_TIME_BETWEEN_UPDATES = datetime.timedelta(minutes=15)
 SENSOR_TYPES = [
     ['temperature', 'Temperature', TEMP_CELSIUS, None, DEVICE_CLASS_TEMPERATURE],
-    ['co2', 'CO2', 'ppm', 'mdi:cloud', None],
-    ['pressure', 'Pressure', 'mbar', 'mdi:gauge', DEVICE_CLASS_PRESSURE],
     ['humidity', 'Humidity', '%', None, DEVICE_CLASS_HUMIDITY],
-    ['voc', 'VOC', 'ppm', 'mdi:cloud', None],
-    ['short_radon', 'Short-term Radon', 'Bq/m3', 'mdi:cloud', None],
-    ['long_radon', 'Long-term Radon', 'Bq/m3', 'mdi:cloud', None],
+    ['short_radon', 'Short-term Radon', 'pCi/L', 'mdi:cloud', None],
+    ['long_radon', 'Long-term Radon', 'pCi/L', 'mdi:cloud', None],
 ]
-
-
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the sensor platform."""
     _LOGGER.debug("Starting airthings")
-    reader = AirthingsWavePlusDataReader(config.get(CONF_MAC))
-    add_devices([ AirthingsSensorEntity(reader, key,name,unit,icon,device_class) for [key, name, unit, icon, device_class] in SENSOR_TYPES])
+    reader = AirthingsWaveDataReader(config.get(CONF_MAC))
+    add_devices([ AirthingsSensorEntity(reader, key, name, unit, icon, device_class) for [key, name, unit, icon, device_class] in SENSOR_TYPES])
 
-class AirthingsWavePlusDataReader:
+class AirthingsWaveDataReader:
     def __init__(self, mac):
         self._mac = mac
         self._state = { }
@@ -59,22 +54,16 @@ class AirthingsWavePlusDataReader:
         from pygatt.backends import Characteristic
         adapter = pygatt.backends.GATTToolBackend()
         char = 'b42e2a68-ade7-11e4-89d3-123b93f75cba'
+
         try:
-            # reset_on_start must be false - reset is hardcoded to do sudo, which does not exist in the hass.io Docker container.
             adapter.start(reset_on_start=False)
             device = adapter.connect(self._mac)
-            # Unclear why this does not work. Seems broken in the command line tool too. Hopefully handle is stable...
-            #value = device.char_read(char,timeout=10)
             value = device.char_read_handle('0x000d',timeout=10)
-            (humidity, light, sh_rad, lo_rad, temp, pressure, co2, voc) = struct.unpack('<xbxbHHHHHHxxxx', value)
-            self._state['humidity'] = humidity / 2.0
-            self._state['light'] = light * 1.0
-            self._state['short_radon'] = sh_rad
-            self._state['long_radon'] = lo_rad
-            self._state['temperature'] = temp / 100.
-            self._state['pressure'] = pressure / 50.
-            self._state['co2'] = co2 * 1.
-            self._state['voc'] = voc * 1.
+            data = struct.unpack('<4B8H', value)
+            self._state['humidity'] = data[1] / 2.0
+            self._state['short_radon'] = round(data[4] / 37, 2)
+            self._state['long_radon'] = round(data[5] / 37, 2)
+            self._state['temperature'] = data[6] / 100.0
         finally:
             adapter.stop()
 
